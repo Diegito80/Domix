@@ -1,0 +1,135 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model FamilyMember {
+  id        String   @id @default(cuid())
+  name      String
+  nameHe    String
+  role      String   // "parent" | "child"
+  age       Float
+  avatarUrl String
+  color     String
+  points    Int      @default(0)
+  createdAt DateTime @default(now())
+
+  createdTasks  Task[]        @relation("CreatedBy")
+  assignedTasks Task[]        @relation("AssignedTo")
+  messages      Message[]
+  redemptions   Redemption[]
+  drawings      Drawing[]
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  emoji       String?
+  pointsValue Int       @default(0)
+  isRecurring Boolean   @default(false)
+  recurrence  String?   // "daily" | "weekdays" | "weekly"
+  dueDate     DateTime?
+  dueTime     String?
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  category    String    @default("general") // "morning_routine" | "chores" | "homework" | "general"
+
+  createdBy    FamilyMember @relation("CreatedBy", fields: [createdById], references: [id])
+  createdById  String
+  assignedTo   FamilyMember @relation("AssignedTo", fields: [assignedToId], references: [id])
+  assignedToId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Message {
+  id       String  @id @default(cuid())
+  content  String
+  emoji    String?
+  pinned   Boolean @default(false)
+
+  author   FamilyMember @relation(fields: [authorId], references: [id])
+  authorId String
+
+  createdAt DateTime @default(now())
+}
+
+model Reward {
+  id          String  @id @default(cuid())
+  name        String
+  nameEn      String?
+  description String?
+  pointsCost  Int
+  emoji       String
+  category    String  // "small" | "medium" | "large" | "epic"
+  isActive    Boolean @default(true)
+
+  redemptions Redemption[]
+}
+
+model Redemption {
+  id     String @id @default(cuid())
+  status String @default("pending") // "pending" | "approved" | "redeemed"
+
+  member   FamilyMember @relation(fields: [memberId], references: [id])
+  memberId String
+  reward   Reward       @relation(fields: [rewardId], references: [id])
+  rewardId String
+
+  createdAt DateTime @default(now())
+}
+
+model Recipe {
+  id          String  @id @default(cuid())
+  title       String
+  category    String  // "breakfast" | "lunch" | "dinner" | "dessert" | "drink"
+  imageUrl    String?
+  prepTime    Int
+  cookTime    Int
+  servings    Int
+  ingredients String  // JSON string array
+  steps       String  // JSON string array of step objects
+  tags        String? // JSON array: ["quick", "healthy", "kids-friendly"]
+  isFavorite  Boolean @default(false)
+}
+
+model CalendarEvent {
+  id            String   @id @default(cuid())
+  googleEventId String?  @unique
+  title         String
+  description   String?
+  startTime     DateTime
+  endTime       DateTime
+  isAllDay      Boolean  @default(false)
+  location      String?
+  color         String?
+  memberIds     String   // JSON array of member IDs
+  eventType     String   @default("general") // "school" | "activity" | "zoom" | "family" | "general"
+  zoomLink      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Drawing {
+  id       String  @id @default(cuid())
+  title    String?
+  dataUrl  String
+
+  member   FamilyMember @relation(fields: [memberId], references: [id])
+  memberId String
+
+  createdAt DateTime @default(now())
+}
+
+model AppSetting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}
