@@ -39,10 +39,10 @@ model Task {
   completedAt DateTime?
   category    String    @default("general") // "morning_routine" | "chores" | "homework" | "general"
 
-  createdBy    FamilyMember @relation("CreatedBy", fields: [createdById], references: [id])
+  createdBy    FamilyMember  @relation("CreatedBy", fields: [createdById], references: [id])
   createdById  String
-  assignedTo   FamilyMember @relation("AssignedTo", fields: [assignedToId], references: [id])
-  assignedToId String
+  assignedTo   FamilyMember? @relation("AssignedTo", fields: [assignedToId], references: [id])
+  assignedToId String?       // null = shared pool, kids can claim it
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -132,4 +132,11 @@ model AppSetting {
   id    String @id @default(cuid())
   key   String @unique
   value String
+}
+
+model ShoppingItem {
+  id        String   @id @default(cuid())
+  name      String
+  completed Boolean  @default(false)
+  createdAt DateTime @default(now())
 }

@@ -9,22 +9,48 @@ interface MediaTile {
   color: string;
   url?: string;
   route?: string;
-  ageMin?: number;
+  logoUrl?: string;
 }
 
 const MEDIA_TILES: MediaTile[] = [
-  { id: "netflix", name: "נטפליקס", emoji: "📺", color: "#E50914", url: "https://netflix.com" },
-  { id: "youtube", name: "יוטיוב", emoji: "▶️", color: "#FF0000", url: "https://youtube.com" },
-  { id: "spotify", name: "ספוטיפיי", emoji: "🎵", color: "#1DB954", url: "https://open.spotify.com" },
-  { id: "youtube-kids", name: "יוטיוב קידס", emoji: "🧸", color: "#FF4081", url: "https://youtubekids.com", ageMin: 0 },
+  {
+    id: "netflix",
+    name: "נטפליקס",
+    emoji: "📺",
+    color: "#E50914",
+    url: "https://netflix.com",
+    logoUrl: "https://www.google.com/s2/favicons?sz=128&domain=netflix.com",
+  },
+  {
+    id: "disney",
+    name: "דיסני+",
+    emoji: "✨",
+    color: "#113CCF",
+    url: "https://disneyplus.com",
+    logoUrl: "https://www.google.com/s2/favicons?sz=128&domain=disneyplus.com",
+  },
+  {
+    id: "youtube",
+    name: "יוטיוב",
+    emoji: "▶️",
+    color: "#FF0000",
+    url: "https://youtube.com",
+    logoUrl: "https://www.google.com/s2/favicons?sz=128&domain=youtube.com",
+  },
+  {
+    id: "spotify",
+    name: "ספוטיפיי",
+    emoji: "🎵",
+    color: "#1DB954",
+    url: "https://open.spotify.com",
+    logoUrl: "https://www.google.com/s2/favicons?sz=128&domain=spotify.com",
+  },
   { id: "drawing", name: "ציור", emoji: "🎨", color: "#9C27B0", route: "/creative" },
   { id: "games", name: "משחקים", emoji: "🎮", color: "#4CAF50", url: "https://poki.com" },
-  { id: "reading", name: "קריאה", emoji: "📖", color: "#795548", url: "https://www.sifria.co.il" },
-  { id: "music", name: "מוזיקה", emoji: "🎶", color: "#FF9800", url: "https://music.youtube.com" },
 ];
 
 // Lian-safe tiles (age 7)
-const LIAN_TILES = ["youtube-kids", "drawing", "games", "reading"];
+const LIAN_TILES = ["disney", "drawing", "games", "netflix"];
 
 interface MediaLauncherProps {
   memberAge?: number;
@@ -67,7 +93,18 @@ export function MediaLauncher({ memberAge, memberName, onNavigate }: MediaLaunch
               backgroundColor: tile.color + "08",
             }}
           >
-            <span className={`${isYoung ? "text-6xl" : "text-4xl"}`}>{tile.emoji}</span>
+            {tile.logoUrl ? (
+              <img
+                src={tile.logoUrl}
+                alt={tile.name}
+                className={`${isYoung ? "w-16 h-16" : "w-10 h-10"} object-contain rounded-lg`}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                  (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
+                }}
+              />
+            ) : null}
+            <span className={`${isYoung ? "text-6xl" : "text-4xl"} ${tile.logoUrl ? "hidden" : ""}`}>{tile.emoji}</span>
             <span className={`font-bold ${isYoung ? "text-lg" : "text-sm"}`}>{tile.name}</span>
           </motion.button>
         ))}

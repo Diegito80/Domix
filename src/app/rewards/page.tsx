@@ -8,6 +8,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { RewardCard } from "@/components/rewards/RewardCard";
 import { RedemptionModal } from "@/components/rewards/RedemptionModal";
 import { Leaderboard } from "@/components/rewards/Leaderboard";
+import { RewardAdminPanel } from "@/components/rewards/RewardAdminPanel";
 import { useAudioFeedback } from "@/lib/hooks/useAudioFeedback";
 
 interface Reward {
@@ -259,9 +260,12 @@ export default function RewardsPage() {
             )}
           </div>
 
-          {/* Sidebar - Leaderboard */}
-          <div className="lg:col-span-1">
+          {/* Sidebar - Leaderboard + Admin Panel */}
+          <div className="lg:col-span-1 space-y-6">
             <Leaderboard members={members} />
+            {isParent && (
+              <RewardAdminPanel rewards={rewards} onRefresh={fetchData} />
+            )}
           </div>
         </div>
 

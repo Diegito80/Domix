@@ -38,8 +38,9 @@ export function VoiceMicButton() {
   const buttonSize = isLian ? 80 : 60;
   const memberColor = activeMember?.color || "#D4A574";
 
-  // Hide on screensaver
+  // Hide on screensaver and entertainment pages
   const isScreensaver = pathname === "/screensaver";
+  const isEntertainment = pathname === "/entertainment";
 
   // Sync listening state to Zustand (pauses idle timer)
   useEffect(() => {
@@ -204,7 +205,9 @@ export function VoiceMicButton() {
 
           case "UNRECOGNIZED":
           default:
-            break;
+            // Don't show "לא הבנתי" toast — just silently ignore unrecognized speech
+            setProcessing(false);
+            return;
         }
       } catch {
         showFeedback("שגיאה בביצוע הפקודה", "error");
@@ -253,8 +256,8 @@ export function VoiceMicButton() {
     }
   };
 
-  // Don't render if voice not enabled, not supported, or on screensaver
-  if (!voiceEnabled || !isSupported || isScreensaver) return null;
+  // Don't render if voice not enabled, not supported, on screensaver, or entertainment
+  if (!voiceEnabled || !isSupported || isScreensaver || isEntertainment) return null;
 
   return (
     <>

@@ -6,9 +6,14 @@ export async function GET(request: NextRequest) {
   const memberId = searchParams.get("memberId");
   const category = searchParams.get("category");
   const completed = searchParams.get("completed");
+  const pool = searchParams.get("pool"); // ?pool=true → shared pool tasks
 
   const where: Record<string, unknown> = {};
-  if (memberId) where.assignedToId = memberId;
+  if (pool === "true") {
+    where.assignedToId = null;
+  } else if (memberId) {
+    where.assignedToId = memberId;
+  }
   if (category) where.category = category;
   if (completed !== null) where.completed = completed === "true";
 
@@ -37,12 +42,12 @@ export async function POST(request: NextRequest) {
     dueTime,
     category = "general",
     createdById,
-    assignedToId,
+    assignedToId, // optional — null means shared pool
   } = body;
 
-  if (!title || !createdById || !assignedToId) {
+  if (!title || !createdById) {
     return NextResponse.json(
-      { error: "title, createdById, and assignedToId are required" },
+      { error: "title and createdById are required" },
       { status: 400 }
     );
   }
@@ -59,7 +64,7 @@ export async function POST(request: NextRequest) {
       dueTime,
       category,
       createdById,
-      assignedToId,
+      assignedToId: assignedToId || null,
     },
     include: {
       assignedTo: { select: { id: true, name: true, nameHe: true, color: true } },

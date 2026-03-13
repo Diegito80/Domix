@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X } from "lucide-react";
+import { X, Mic, MicOff } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
 interface FamilyMember {
@@ -36,12 +36,38 @@ export function AddEventModal({ isOpen, onClose, onSubmit, defaultDate }: AddEve
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [zoomLink, setZoomLink] = useState("");
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   useEffect(() => {
     fetch("/api/members")
       .then((r) => r.json())
       .then(setMembers);
   }, []);
+
+  const startVoiceTitle = () => {
+    const SR = (window as unknown as { SpeechRecognition?: typeof SpeechRecognition; webkitSpeechRecognition?: typeof SpeechRecognition }).SpeechRecognition ||
+               (window as unknown as { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition;
+    if (!SR) return;
+    const recognition = new SR();
+    recognition.lang = "he-IL";
+    recognition.interimResults = false;
+    recognition.onresult = (e: SpeechRecognitionEvent) => {
+      const text = e.results[0][0].transcript;
+      setTitle(text);
+      setIsVoiceListening(false);
+    };
+    recognition.onend = () => setIsVoiceListening(false);
+    recognition.onerror = () => setIsVoiceListening(false);
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsVoiceListening(true);
+  };
+
+  const stopVoice = () => {
+    recognitionRef.current?.stop();
+    setIsVoiceListening(false);
+  };
 
   const handleSubmit = () => {
     if (!title.trim()) return;
@@ -89,14 +115,28 @@ export function AddEventModal({ isOpen, onClose, onSubmit, defaultDate }: AddEve
             </div>
 
             <div className="space-y-4">
-              <input
-                type="text"
-                placeholder="שם האירוע"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full rounded-xl border-2 border-border focus:border-accent-warm p-3 bg-background outline-none"
-                autoFocus
-              />
+              <div className="flex gap-2 items-center">
+                <input
+                  type="text"
+                  placeholder="שם האירוע"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="flex-1 rounded-xl border-2 border-border focus:border-accent-warm p-3 bg-background outline-none"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={isVoiceListening ? stopVoice : startVoiceTitle}
+                  className={`p-3 rounded-xl transition-all shrink-0 ${
+                    isVoiceListening
+                      ? "bg-red-500 text-white animate-pulse"
+                      : "bg-background border border-border hover:bg-accent-warm/10 text-text-secondary hover:text-accent-warm"
+                  }`}
+                  title="הקלט שם אירוע"
+                >
+                  {isVoiceListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                </button>
+              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Trash2, RotateCw } from "lucide-react";
+import { Trash2, RotateCw, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Task {
@@ -17,7 +17,7 @@ interface Task {
     name: string;
     nameHe: string;
     color: string;
-  };
+  } | null;
 }
 
 interface TaskCardProps {
@@ -39,7 +39,7 @@ export function TaskCard({ task, onToggle, onDelete, isKidsMode = false }: TaskC
         task.completed && "opacity-60",
         isKidsMode ? "py-5" : "py-3"
       )}
-      style={{ borderColor: task.assignedTo.color + "40" }}
+      style={{ borderColor: (task.assignedTo?.color ?? "#D4A574") + "40" }}
     >
       {/* Checkbox */}
       <button
@@ -81,15 +81,17 @@ export function TaskCard({ task, onToggle, onDelete, isKidsMode = false }: TaskC
         </div>
         {!isKidsMode && (
           <div className="flex items-center gap-2 mt-1">
-            <span
-              className="text-xs px-2 py-0.5 rounded-full font-medium"
-              style={{
-                backgroundColor: task.assignedTo.color + "20",
-                color: task.assignedTo.color,
-              }}
-            >
-              {task.assignedTo.nameHe}
-            </span>
+            {task.assignedTo && (
+              <span
+                className="text-xs px-2 py-0.5 rounded-full font-medium"
+                style={{
+                  backgroundColor: task.assignedTo.color + "20",
+                  color: task.assignedTo.color,
+                }}
+              >
+                {task.assignedTo.nameHe}
+              </span>
+            )}
             {task.isRecurring && (
               <span className="text-xs text-text-secondary flex items-center gap-1">
                 <RotateCw className="w-3 h-3" />
@@ -113,6 +115,25 @@ export function TaskCard({ task, onToggle, onDelete, isKidsMode = false }: TaskC
           ⭐ {task.pointsValue}
         </div>
       )}
+
+      {/* TTS playback (always available) */}
+      <button
+        onClick={() => {
+          if ("speechSynthesis" in window) {
+            window.speechSynthesis.cancel();
+            const utt = new SpeechSynthesisUtterance(task.title);
+            utt.lang = "he-IL";
+            window.speechSynthesis.speak(utt);
+          }
+        }}
+        className={cn(
+          "p-2 rounded-xl text-text-secondary hover:text-accent-warm hover:bg-accent-warm/10 transition-all shrink-0",
+          isKidsMode ? "p-3" : "p-2"
+        )}
+        title="הקשב למשימה"
+      >
+        <Volume2 className={isKidsMode ? "w-5 h-5" : "w-4 h-4"} />
+      </button>
 
       {/* Delete (parent mode only) */}
       {onDelete && !isKidsMode && (

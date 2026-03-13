@@ -1,6 +1,11 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 
+export async function DELETE() {
+  await prisma.message.deleteMany({});
+  return NextResponse.json({ ok: true });
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const take = Number(searchParams.get("take") || "50");

@@ -8,6 +8,18 @@ export async function PATCH(
   const { id } = await params;
   const body = await request.json();
 
+  // Handle claiming a pool task (assigning to a member)
+  if (body.claim === true && body.memberId) {
+    const updated = await prisma.task.update({
+      where: { id },
+      data: { assignedToId: body.memberId },
+      include: {
+        assignedTo: { select: { id: true, name: true, nameHe: true, color: true } },
+      },
+    });
+    return NextResponse.json(updated);
+  }
+
   // If completing a task, add points to the assigned member
   if (body.completed === true) {
     const task = await prisma.task.findUnique({
@@ -19,7 +31,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    if (!task.completed && task.pointsValue > 0) {
+    if (!task.completed && task.pointsValue > 0 && task.assignedToId) {
       await prisma.familyMember.update({
         where: { id: task.assignedToId },
         data: { points: { increment: task.pointsValue } },
@@ -36,7 +48,7 @@ export async function PATCH(
       select: { assignedToId: true, pointsValue: true, completed: true },
     });
 
-    if (task?.completed && task.pointsValue > 0) {
+    if (task?.completed && task.pointsValue > 0 && task.assignedToId) {
       await prisma.familyMember.update({
         where: { id: task.assignedToId },
         data: { points: { decrement: task.pointsValue } },
@@ -46,9 +58,13 @@ export async function PATCH(
     body.completedAt = null;
   }
 
+  // Remove internal fields before passing to Prisma
+  const { claim, memberId, ...updateData } = body;
+  void claim; void memberId;
+
   const updated = await prisma.task.update({
     where: { id },
-    data: body,
+    data: updateData,
     include: {
       assignedTo: { select: { id: true, name: true, nameHe: true, color: true, points: true } },
     },

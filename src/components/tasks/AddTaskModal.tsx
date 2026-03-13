@@ -21,7 +21,20 @@ interface AddTaskModalProps {
   createdById: string;
 }
 
-const EMOJI_OPTIONS = ["🪥", "🛏️", "📝", "🐕", "📖", "🧸", "🧹", "🍽️", "👕", "🎨", "🎵", "💪"];
+const EMOJI_OPTIONS = [
+  // Chores
+  "🪥", "🛏️", "🧹", "🍽️", "👕", "🧺", "🚿", "🗑️", "🧽", "🪣",
+  // School / homework
+  "📝", "📖", "✏️", "🎒", "📚", "🔬", "🧮", "📐",
+  // Pets
+  "🐕", "🐈", "🐾", "🦮",
+  // Activities
+  "🎨", "🎵", "💪", "🏃", "⚽", "🎮", "🎯", "🧩", "🏊", "🚴",
+  // Food
+  "🍎", "🥦", "🥗", "🍳", "🧁",
+  // Other
+  "🧸", "⭐", "❤️", "🌟", "✅", "🎁", "🌱", "💡", "🤝",
+];
 
 export function AddTaskModal({ isOpen, onClose, onSubmit, createdById }: AddTaskModalProps) {
   const [title, setTitle] = useState("");
@@ -39,12 +52,12 @@ export function AddTaskModal({ isOpen, onClose, onSubmit, createdById }: AddTask
       .then((all: FamilyMember[]) => {
         const kids = all.filter((m) => m.role === "child");
         setMembers(kids);
-        if (kids.length > 0 && !assignedToId) setAssignedToId(kids[0].id);
+        // Default to shared pool (no assignee)
       });
   }, []);
 
   const handleSubmit = () => {
-    if (!title.trim() || !assignedToId) return;
+    if (!title.trim()) return;
     onSubmit({
       title: title.trim(),
       emoji,
@@ -98,14 +111,17 @@ export function AddTaskModal({ isOpen, onClose, onSubmit, createdById }: AddTask
 
               {/* Emoji */}
               <div>
-                <label className="text-sm text-text-secondary mb-2 block">אמוג'י</label>
-                <div className="flex flex-wrap gap-2">
+                <label className="text-sm text-text-secondary mb-2 block flex items-center gap-2">
+                  <span>אמוג&apos;י</span>
+                  <span className="text-xl">{emoji}</span>
+                </label>
+                <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto bg-background rounded-xl p-2">
                   {EMOJI_OPTIONS.map((e) => (
                     <button
                       key={e}
                       onClick={() => setEmoji(e)}
-                      className={`text-2xl p-2 rounded-xl transition-all ${
-                        emoji === e ? "bg-accent-warm/20 scale-110" : "hover:bg-background"
+                      className={`text-xl p-1.5 rounded-lg transition-all ${
+                        emoji === e ? "bg-accent-warm/20 ring-2 ring-accent-warm scale-110" : "hover:bg-card"
                       }`}
                     >
                       {e}
@@ -117,17 +133,37 @@ export function AddTaskModal({ isOpen, onClose, onSubmit, createdById }: AddTask
               {/* Points */}
               <div>
                 <label className="text-sm text-text-secondary mb-2 block">
-                  נקודות: {pointsValue}
+                  נקודות
                 </label>
-                <input
-                  type="range"
-                  min={5}
-                  max={50}
-                  step={5}
-                  value={pointsValue}
-                  onChange={(e) => setPointsValue(Number(e.target.value))}
-                  className="w-full accent-warning"
-                />
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPointsValue(Math.max(5, pointsValue - 5))}
+                    className="w-9 h-9 rounded-xl bg-background border border-border font-bold text-lg hover:bg-warning/10 transition-all"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min={5}
+                    max={1000}
+                    step={5}
+                    value={pointsValue}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (v >= 5 && v <= 1000) setPointsValue(v);
+                    }}
+                    className="w-20 text-center rounded-xl border-2 border-border focus:border-warning p-2 bg-background outline-none font-bold text-warning"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPointsValue(Math.min(1000, pointsValue + 5))}
+                    className="w-9 h-9 rounded-xl bg-background border border-border font-bold text-lg hover:bg-warning/10 transition-all"
+                  >
+                    +
+                  </button>
+                  <span className="text-sm text-text-secondary">⭐</span>
+                </div>
               </div>
 
               {/* Category */}
@@ -154,6 +190,16 @@ export function AddTaskModal({ isOpen, onClose, onSubmit, createdById }: AddTask
               <div>
                 <label className="text-sm text-text-secondary mb-2 block">שייך ל</label>
                 <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setAssignedToId("")}
+                    className="px-3 py-2 rounded-xl text-sm font-medium transition-all border-2"
+                    style={{
+                      borderColor: !assignedToId ? "#D4A574" : "transparent",
+                      backgroundColor: !assignedToId ? "#D4A57420" : "var(--color-background)",
+                    }}
+                  >
+                    🌀 משותף
+                  </button>
                   {members.map((m) => (
                     <button
                       key={m.id}
