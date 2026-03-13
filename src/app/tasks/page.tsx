@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Plus, Star } from "lucide-react";
+import { Plus, Star, Users } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { AppShell } from "@/components/layout/AppShell";
 import { TaskCard } from "@/components/tasks/TaskCard";
@@ -27,7 +27,7 @@ interface Task {
     nameHe: string;
     color: string;
     points?: number;
-  };
+  } | null;
 }
 
 interface FamilyMember {
@@ -42,6 +42,7 @@ interface FamilyMember {
 export default function TasksPage() {
   const activeMember = useAppStore((s) => s.activeMember);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [poolTasks, setPoolTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
@@ -54,13 +55,19 @@ export default function TasksPage() {
 
   const fetchTasks = useCallback(() => {
     const params = new URLSearchParams();
-    // Kids see only their tasks, parents see all
     if (isKidsMode && activeMember) {
       params.set("memberId", activeMember.id);
     }
     fetch(`/api/tasks?${params}`)
       .then((r) => r.json())
       .then(setTasks);
+
+    // Also fetch shared pool tasks for kids
+    if (isKidsMode) {
+      fetch("/api/tasks?pool=true")
+        .then((r) => r.json())
+        .then(setPoolTasks);
+    }
   }, [activeMember, isKidsMode]);
 
   const fetchMembers = useCallback(() => {
@@ -111,6 +118,16 @@ export default function TasksPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
+    });
+    fetchTasks();
+  };
+
+  const handleClaim = async (taskId: string) => {
+    if (!activeMember) return;
+    await fetch(`/api/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ claim: true, memberId: activeMember.id }),
     });
     fetchTasks();
   };
@@ -206,13 +223,13 @@ export default function TasksPage() {
           <AnimatePresence mode="popLayout">
             {filteredTasks.length === 0 ? (
               <p className="text-center text-text-secondary py-8">
-                {isKidsMode ? "אין משימות! 🎉" : "אין משימות עדיין"}
+                {isKidsMode ? "אין משימות שלך! 🎉" : "אין משימות עדיין"}
               </p>
             ) : (
               filteredTasks.map((task) => (
                 <TaskCard
                   key={task.id}
-                  task={task}
+                  task={task as Parameters<typeof TaskCard>[0]["task"]}
                   onToggle={handleToggle}
                   onDelete={isParent ? handleDelete : undefined}
                   isKidsMode={isKidsMode}
@@ -221,6 +238,58 @@ export default function TasksPage() {
             )}
           </AnimatePresence>
         </div>
+
+        {/* Shared pool section (kids mode) */}
+        {isKidsMode && poolTasks.length > 0 && (
+          <div className="mt-8">
+            <div className="flex items-center gap-2 mb-3">
+              <Users className="w-5 h-5 text-accent-warm" />
+              <h2 className="font-bold text-lg">משימות פתוחות לקחת</h2>
+              <span className="text-sm text-text-secondary">({poolTasks.length})</span>
+            </div>
+            <div className="space-y-2">
+              {poolTasks.map((task) => (
+                <motion.div
+                  key={task.id}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="flex items-center gap-3 bg-card border-2 border-dashed border-accent-warm/30 rounded-2xl p-4"
+                >
+                  {task.emoji && <span className="text-2xl">{task.emoji}</span>}
+                  <span className="flex-1 font-semibold">{task.title}</span>
+                  <span className="text-warning font-bold text-sm">⭐ {task.pointsValue}</span>
+                  <button
+                    onClick={() => handleClaim(task.id)}
+                    className="px-4 py-2 rounded-xl bg-accent-warm text-white text-sm font-bold hover:bg-accent-warm/80 transition-all"
+                  >
+                    קח!
+                  </button>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Parent: show all members summary */}
+        {isParent && members.length > 0 && (
+          <div className="mt-8 p-4 bg-card rounded-2xl border border-border">
+            <div className="flex items-center gap-2 mb-3">
+              <Star className="w-5 h-5 text-warning" />
+              <h2 className="font-bold">סיכום נקודות</h2>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {members.filter(m => m.role === "child").map((m) => (
+                <div key={m.id} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-background">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: m.color }}>
+                    {m.name.charAt(0)}
+                  </div>
+                  <span className="font-medium text-sm">{m.nameHe}</span>
+                  <span className="text-warning font-bold text-sm">⭐ {m.points}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {activeMember && (
           <AddTaskModal

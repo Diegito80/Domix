@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Pin, Smile } from "lucide-react";
+import { Send, Pin, Smile, Trash2 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { AppShell } from "@/components/layout/AppShell";
 import { MessageBubble } from "@/components/chat/MessageBubble";
@@ -87,6 +87,17 @@ export default function ChatPage() {
     fetchMessages();
   };
 
+  const handleDelete = async (messageId: string) => {
+    await fetch(`/api/messages/${messageId}`, { method: "DELETE" });
+    fetchMessages();
+  };
+
+  const handleClearAll = async () => {
+    if (!confirm("למחוק את כל ההודעות?")) return;
+    await fetch("/api/messages", { method: "DELETE" });
+    fetchMessages();
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -102,7 +113,18 @@ export default function ChatPage() {
   return (
     <AppShell>
       <div className="max-w-2xl mx-auto flex flex-col h-[calc(100vh-180px)]">
-        <h1 className="text-2xl font-bold mb-4">לוח הודעות משפחתי</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold">לוח הודעות משפחתי</h1>
+          {activeMember?.role === "parent" && (
+            <button
+              onClick={handleClearAll}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm text-text-secondary hover:text-error hover:bg-error/10 transition-all"
+            >
+              <Trash2 className="w-4 h-4" />
+              נקה צ&apos;אט
+            </button>
+          )}
+        </div>
 
         {/* Pinned messages */}
         {pinnedMessages.length > 0 && (
@@ -133,7 +155,12 @@ export default function ChatPage() {
                 <MessageBubble
                   message={msg}
                   isOwn={msg.author.id === activeMember?.id}
+                  canDelete={
+                    msg.author.id === activeMember?.id ||
+                    activeMember?.role === "parent"
+                  }
                   onReact={handleReact}
+                  onDelete={handleDelete}
                 />
               </motion.div>
             ))}

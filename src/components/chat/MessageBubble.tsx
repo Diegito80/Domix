@@ -1,7 +1,7 @@
 "use client";
 
 import { formatRelativeTime } from "@/lib/utils";
-import { Pin } from "lucide-react";
+import { Pin, Trash2 } from "lucide-react";
 
 interface Message {
   id: string;
@@ -21,12 +21,14 @@ interface Message {
 interface MessageBubbleProps {
   message: Message;
   isOwn: boolean;
+  canDelete?: boolean;
   onReact: (id: string, emoji: string) => void;
+  onDelete?: (id: string) => void;
 }
 
 const QUICK_REACTIONS = ["❤️", "😂", "👍", "🎉", "😮", "💪"];
 
-export function MessageBubble({ message, isOwn, onReact }: MessageBubbleProps) {
+export function MessageBubble({ message, isOwn, canDelete, onReact, onDelete }: MessageBubbleProps) {
   const isParent = message.author.role === "parent";
 
   return (
@@ -70,8 +72,8 @@ export function MessageBubble({ message, isOwn, onReact }: MessageBubbleProps) {
           </div>
         )}
 
-        {/* Quick reactions */}
-        <div className="flex gap-1 mt-1 opacity-0 hover:opacity-100 transition-opacity">
+        {/* Quick reactions + delete */}
+        <div className="flex gap-1 mt-1 opacity-0 hover:opacity-100 transition-opacity items-center">
           {QUICK_REACTIONS.map((emoji) => (
             <button
               key={emoji}
@@ -81,6 +83,15 @@ export function MessageBubble({ message, isOwn, onReact }: MessageBubbleProps) {
               {emoji}
             </button>
           ))}
+          {canDelete && onDelete && (
+            <button
+              onClick={() => onDelete(message.id)}
+              className="mr-1 p-1 rounded-lg text-text-secondary hover:text-error hover:bg-error/10 transition-all"
+              title="מחק הודעה"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
     </div>
