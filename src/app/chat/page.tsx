@@ -31,38 +31,51 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [showEmoji, setShowEmoji] = useState(false);
+  const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const fetchMessages = useCallback(() => {
     fetch("/api/messages?take=100")
       .then((r) => r.json())
-      .then(setMessages);
+      .then((data: Message[]) => {
+        setMessages((prev) => {
+          if (prev.length === data.length && prev[0]?.id === data[0]?.id) return prev;
+          return data;
+        });
+      });
   }, []);
 
   useEffect(() => {
     fetchMessages();
-    // Poll every 10 seconds
     const interval = setInterval(fetchMessages, 10000);
     return () => clearInterval(interval);
   }, [fetchMessages]);
 
+  const prevMessagesLenRef = useRef(0);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.length !== prevMessagesLenRef.current) {
+      prevMessagesLenRef.current = messages.length;
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages]);
 
   const handleSend = async () => {
-    if (!input.trim() || !activeMember) return;
+    if (!input.trim() || !activeMember || sending) return;
 
-    await fetch("/api/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: input.trim(), authorId: activeMember.id }),
-    });
-
-    setInput("");
-    setShowEmoji(false);
-    fetchMessages();
-    play("message-sent");
+    setSending(true);
+    try {
+      await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: input.trim(), authorId: activeMember.id }),
+      });
+      setInput("");
+      setShowEmoji(false);
+      fetchMessages();
+      play("message-sent");
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleReact = async (messageId: string, emoji: string) => {
@@ -176,7 +189,7 @@ export default function ChatPage() {
 
             <button
               onClick={handleSend}
-              disabled={!input.trim()}
+              disabled={!input.trim() || sending}
               className="p-3 rounded-xl transition-all shrink-0 disabled:opacity-30"
               style={{ backgroundColor: activeMember?.color || "#D4A574" }}
             >

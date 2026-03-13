@@ -23,7 +23,9 @@ export function ProfileSelector() {
 
   useEffect(() => {
     fetch("/api/members")
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => (Array.isArray(data) ? data : []))
+      .catch(() => [])
       .then(setMembers);
   }, []);
 
@@ -46,7 +48,10 @@ export function ProfileSelector() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-background px-6 py-12">
+    <div
+      className="flex flex-col items-center justify-center min-h-screen bg-background px-6 py-12"
+      style={{ backgroundColor: "#F7F5F0", color: "#2D2D2D" }}
+    >
       {/* Clock */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}

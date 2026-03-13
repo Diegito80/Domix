@@ -12,13 +12,21 @@ const SOUND_CONFIGS: Record<SoundName, { freqs: number[]; type: OscillatorType; 
   notification: { freqs: [440, 550], type: "sine", duration: 0.15 },
 };
 
+const SOUND_THROTTLE_MS = 400;
+
 export function useAudioFeedback() {
   const soundEnabled = useAppStore((s) => s.soundEnabled);
   const ctxRef = useRef<AudioContext | null>(null);
+  const lastPlayedRef = useRef<Record<string, number>>({});
 
   const play = useCallback(
     (name: SoundName) => {
       if (!soundEnabled) return;
+
+      const now = Date.now();
+      const last = lastPlayedRef.current[name] ?? 0;
+      if (now - last < SOUND_THROTTLE_MS) return;
+      lastPlayedRef.current[name] = now;
 
       try {
         // Reuse a single AudioContext to avoid browser autoplay restrictions

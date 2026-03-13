@@ -218,9 +218,20 @@ export function VoiceMicButton() {
     [activeMember, router, play, showFeedback, setActiveMember]
   );
 
+  // Avoid executing the same transcript twice (e.g. speech API firing multiple results)
+  const lastExecutedRef = useRef<{ transcript: string; at: number }>({ transcript: "", at: 0 });
+  const SAME_TRANSCRIPT_COOLDOWN_MS = 5000;
+
   // Process transcript when it changes (listening stopped with a result)
   useEffect(() => {
     if (!isListening && transcript && !processing) {
+      const trimmed = transcript.trim();
+      if (!trimmed) return;
+
+      const { transcript: last, at } = lastExecutedRef.current;
+      if (last === trimmed && Date.now() - at < SAME_TRANSCRIPT_COOLDOWN_MS) return;
+      lastExecutedRef.current = { transcript: trimmed, at: Date.now() };
+
       let command = parseVoiceCommand(transcript, isLian);
 
       // Context-aware: on chat page, treat unrecognized speech as a message

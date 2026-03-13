@@ -6,7 +6,7 @@ import { ClientProviders } from "@/components/providers/ClientProviders";
 const heebo = Heebo({
   subsets: ["hebrew", "latin"],
   variable: "--font-heebo",
-  display: "swap",
+  display: "optional",
 });
 
 export const metadata: Metadata = {
@@ -21,7 +21,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="he" dir="rtl">
-      <body className={`${heebo.variable} font-sans antialiased`}>
+      <body
+        className={`${heebo.variable} font-sans antialiased`}
+        style={{ backgroundColor: "#F7F5F0", color: "#2D2D2D" }}
+      >
         <ClientProviders>{children}</ClientProviders>
       </body>
     </html>
