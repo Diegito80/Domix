@@ -48,27 +48,6 @@ function playNotificationChime() {
   } catch {}
 }
 
-// Auto-trigger screensaver at 8pm
-function useNightScreensaver(onNight: () => void) {
-  const firedRef = useRef(false);
-  useEffect(() => {
-    const check = () => {
-      const h = new Date().getHours();
-      if (h >= 20 && h < 22) {
-        if (!firedRef.current) {
-          firedRef.current = true;
-          onNight();
-        }
-      } else {
-        firedRef.current = false;
-      }
-    };
-    check();
-    const interval = setInterval(check, 60 * 1000);
-    return () => clearInterval(interval);
-  }, [onNight]);
-}
-
 // Check for upcoming calendar events (10 minutes before)
 function useEventNotifications(onNotify: (title: string) => void) {
   const notifiedRef = useRef<Set<string>>(new Set());
@@ -113,7 +92,6 @@ export function AppShell({ children }: AppShellProps) {
   }, []);
 
   useIdleTimer(handleIdle);
-  useNightScreensaver(handleIdle);
   useEventNotifications(handleEventNotify);
 
   // Reset recurring tasks once per day
