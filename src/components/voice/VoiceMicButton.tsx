@@ -235,12 +235,7 @@ export function VoiceMicButton() {
       if (last === trimmed && Date.now() - at < SAME_TRANSCRIPT_COOLDOWN_MS) return;
       lastExecutedRef.current = { transcript: trimmed, at: Date.now() };
 
-      let command = parseVoiceCommand(transcript, isLian);
-
-      // Context-aware: on chat page, treat unrecognized speech as a message
-      if (command.action === "UNRECOGNIZED" && pathname === "/chat" && activeMember) {
-        command = { action: "SEND_MESSAGE", param: transcript, raw: transcript };
-      }
+      const command = parseVoiceCommand(transcript, isLian);
 
       setContextHint(undefined);
       executeCommand(command);
