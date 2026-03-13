@@ -39,9 +39,6 @@ export function TimerWidget() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const alertedRef = useRef(false);
 
-  // Don't show on screensaver
-  if (pathname === "/screensaver") return null;
-
   const tick = useCallback(() => {
     setRemaining((prev) => {
       if (prev <= 1) {
@@ -66,6 +63,9 @@ export function TimerWidget() {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [running, tick]);
+
+  // Don't show on screensaver
+  if (pathname === "/screensaver") return null;
 
   const startTimer = (seconds: number) => {
     setTotalSeconds(seconds);
