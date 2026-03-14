@@ -6,7 +6,7 @@ const CHROMIUM_PATH =
   process.env.CHROMIUM_PATH ||
   "/root/.cache/ms-playwright/chromium-1194/chrome-linux/chrome";
 
-export async function POST() {
+export async function POST(request: Request) {
   const username = process.env.SMARTSCHOOL_USER;
   const password = process.env.SMARTSCHOOL_PASS;
 
@@ -16,6 +16,10 @@ export async function POST() {
       { status: 500 }
     );
   }
+
+  // Support ?debug=1 to return raw HTML for troubleshooting
+  const url = new URL(request.url);
+  const debugMode = url.searchParams.get("debug") === "1";
 
   // Find a parent to use as the author for scraped announcements
   const systemAuthor = await prisma.familyMember.findFirst({
@@ -43,46 +47,75 @@ export async function POST() {
       locale: "he-IL",
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      httpCredentials: { username, password },
     });
 
     const page = await context.newPage();
 
-    // Navigate to the notifications page (will redirect to login if not authenticated)
-    await page.goto(`${SMARTSCHOOL_URL}/notification`, {
-      waitUntil: "domcontentloaded",
+    // Navigate to login page first
+    await page.goto(`${SMARTSCHOOL_URL}/login`, {
+      waitUntil: "networkidle",
       timeout: 30000,
     }).catch(() => {
-      // Ignore HTTP error codes (e.g. redirect to login returns non-2xx)
+      // Try root URL if /login doesn't exist
     });
 
-    // If redirected to login page, perform login
-    const currentUrl = page.url();
-    if (!currentUrl.includes("/notification")) {
-      // Fill login form — SmartSchool uses standard username/password fields
-      await page.fill('input[name="username"], input[type="text"]:first-of-type', username);
-      await page.fill('input[name="password"], input[type="password"]', password);
-      await page.click('button[type="submit"], input[type="submit"]');
+    // If we're not already logged in, attempt login
+    let currentUrl = page.url();
+    const isLoginPage =
+      !currentUrl.includes("/notification") &&
+      (currentUrl.includes("/login") ||
+        (await page.$('input[type="password"]').catch(() => null)) !== null);
 
-      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+    if (isLoginPage || !currentUrl.includes("/notification")) {
+      // Fill login credentials
+      const userInput = await page.$(
+        'input[name="username"], input[name="user"], input[type="text"], input[type="email"]'
+      );
+      const passInput = await page.$('input[name="password"], input[type="password"]');
 
-      // Navigate to notifications after login
-      if (!page.url().includes("/notification")) {
+      if (userInput && passInput) {
+        await userInput.fill(username);
+        await passInput.fill(password);
+        await page.click('button[type="submit"], input[type="submit"], button:has-text("כניסה"), button:has-text("התחבר")');
+        await page.waitForNavigation({ waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
+      }
+
+      // Navigate to notifications page after login
+      currentUrl = page.url();
+      if (!currentUrl.includes("/notification")) {
         await page.goto(`${SMARTSCHOOL_URL}/notification`, {
-          waitUntil: "domcontentloaded",
-          timeout: 15000,
+          waitUntil: "networkidle",
+          timeout: 20000,
         }).catch(() => {});
       }
     }
 
-    // Wait for notification items to load
-    await page.waitForSelector(".notification-item, .message-item, [class*='notification'], [class*='message']", {
-      timeout: 10000,
-    }).catch(() => {
-      // Selector may not match — proceed to extract what we can
-    });
+    // Wait extra time for Angular/React SPA to render content
+    await page.waitForTimeout(3000);
 
-    // Extract the last 5 announcements
+    // Try to wait for any row-like elements (Angular Material or standard table)
+    await page
+      .waitForSelector(
+        [
+          "mat-row",
+          "tr.mat-row",
+          "tbody tr",
+          "[class*='notification-row']",
+          "[class*='notification-item']",
+        ].join(", "),
+        { timeout: 10000 }
+      )
+      .catch(() => {
+        // Proceed even if no known selector found
+      });
+
+    if (debugMode) {
+      const html = await page.content();
+      await browser.close();
+      return NextResponse.json({ url: page.url(), html: html.substring(0, 50000) });
+    }
+
+    // Extract announcements — handles Angular Material tables and standard HTML tables
     const scraped = await page.evaluate(() => {
       const results: Array<{
         id: string;
@@ -91,40 +124,68 @@ export async function POST() {
         date: string;
       }> = [];
 
-      // Try multiple common selector patterns for SmartSchool
-      const containers = document.querySelectorAll(
-        ".notification-item, .message-item, .notification-row, " +
-        "[class*='notification-item'], [class*='message-row'], " +
-        "li[data-id], div[data-id], tr[data-id]"
+      // --- Strategy 1: Angular Material table rows (mat-row) ---
+      const matRows = Array.from(
+        document.querySelectorAll("mat-row, tr.mat-row, [class*='mat-row']")
       );
 
-      containers.forEach((el) => {
-        if (results.length >= 5) return;
+      if (matRows.length > 0) {
+        matRows.slice(0, 5).forEach((row, idx) => {
+          const cells = Array.from(
+            row.querySelectorAll("mat-cell, td.mat-cell, td, [class*='mat-cell']")
+          );
+          const texts = cells.map((c) => c.textContent?.trim() || "").filter(Boolean);
+          if (texts.length > 0) {
+            results.push({
+              id: row.getAttribute("data-id") || String(idx),
+              title: texts[0].substring(0, 120),
+              content: texts.slice(0, 2).join(" | "),
+              date: texts[1] || new Date().toISOString(),
+            });
+          }
+        });
+      }
 
-        const id =
-          el.getAttribute("data-id") ||
-          el.getAttribute("id") ||
-          String(Math.random());
+      // --- Strategy 2: Standard HTML table rows (skip header) ---
+      if (results.length === 0) {
+        const tables = document.querySelectorAll("table");
+        tables.forEach((table) => {
+          const rows = Array.from(table.querySelectorAll("tbody tr, tr:not(:first-child)"));
+          rows.slice(0, 5).forEach((row, idx) => {
+            const cells = Array.from(row.querySelectorAll("td"));
+            const texts = cells.map((c) => c.textContent?.trim() || "").filter(Boolean);
+            if (texts.length > 0) {
+              results.push({
+                id: row.getAttribute("data-id") || `row-${idx}`,
+                title: texts[0].substring(0, 120),
+                content: texts.slice(0, 2).join(" | "),
+                date: texts[1] || new Date().toISOString(),
+              });
+            }
+          });
+        });
+      }
 
-        const titleEl =
-          el.querySelector(".title, .subject, h3, h4, strong, b") ||
-          el.querySelector("[class*='title'], [class*='subject']");
-
-        const contentEl =
-          el.querySelector(".content, .body, .text, p, .description") ||
-          el.querySelector("[class*='content'], [class*='body']");
-
-        const dateEl =
-          el.querySelector(".date, .time, time, [class*='date'], [class*='time']");
-
-        const title = titleEl?.textContent?.trim() || "";
-        const content = contentEl?.textContent?.trim() || "";
-        const date = dateEl?.textContent?.trim() || new Date().toISOString();
-
-        if (title || content) {
-          results.push({ id, title: title || content.substring(0, 60), content, date });
-        }
-      });
+      // --- Strategy 3: Any list items or divs with substantial text ---
+      if (results.length === 0) {
+        const candidates = Array.from(
+          document.querySelectorAll(
+            "li, .notification-item, .message-item, div[class*='notification'], div[class*='message']"
+          )
+        );
+        candidates
+          .filter((el) => (el.textContent?.trim().length || 0) > 20)
+          .slice(0, 5)
+          .forEach((el, idx) => {
+            const text = el.textContent?.trim() || "";
+            results.push({
+              id: el.getAttribute("data-id") || String(idx),
+              title: text.substring(0, 120),
+              content: text,
+              date: new Date().toISOString(),
+            });
+          });
+      }
 
       return results;
     });
@@ -132,7 +193,10 @@ export async function POST() {
     await browser.close();
 
     if (scraped.length === 0) {
-      return NextResponse.json({ synced: 0, message: "No announcements found on page" });
+      return NextResponse.json({
+        synced: 0,
+        message: "No announcements found on page. Try POST /api/scrape-school?debug=1 to inspect HTML.",
+      });
     }
 
     // Upsert announcements — skip ones already saved (by externalId)
