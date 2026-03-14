@@ -17,9 +17,8 @@ export async function POST(request: Request) {
     );
   }
 
-  // Support ?debug=1 to return raw HTML for troubleshooting
-  const url = new URL(request.url);
-  const debugMode = url.searchParams.get("debug") === "1";
+  const reqUrl = new URL(request.url);
+  const debugMode = reqUrl.searchParams.get("debug") === "1";
 
   // Find a parent to use as the author for scraped announcements
   const systemAuthor = await prisma.familyMember.findFirst({
@@ -49,130 +48,115 @@ export async function POST(request: Request) {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     });
 
-    const page = await context.newPage();
+    // Intercept API calls to discover login endpoint and capture auth tokens
+    const capturedRequests: Array<{ url: string; method: string; body: string }> = [];
+    const capturedResponses: Array<{ url: string; status: number; body: string }> = [];
 
-    // Navigate to login page first
-    await page.goto(`${SMARTSCHOOL_URL}/login`, {
-      waitUntil: "networkidle",
-      timeout: 30000,
-    }).catch(() => {
-      // Try root URL if /login doesn't exist
+    context.on("request", (req) => {
+      const url = req.url();
+      if (
+        url.includes("/api/") ||
+        url.includes("/auth") ||
+        url.includes("/login") ||
+        url.includes("/token") ||
+        url.includes("/notification")
+      ) {
+        capturedRequests.push({
+          url,
+          method: req.method(),
+          body: req.postData() || "",
+        });
+      }
     });
 
-    // If we're not already logged in, attempt login
-    let currentUrl = page.url();
-    const isLoginPage =
-      !currentUrl.includes("/notification") &&
-      (currentUrl.includes("/login") ||
-        (await page.$('input[type="password"]').catch(() => null)) !== null);
-
-    if (isLoginPage || !currentUrl.includes("/notification")) {
-      // Fill login credentials
-      const userInput = await page.$(
-        'input[name="username"], input[name="user"], input[type="text"], input[type="email"]'
-      );
-      const passInput = await page.$('input[name="password"], input[type="password"]');
-
-      if (userInput && passInput) {
-        // Directly set values and dispatch native Angular-compatible events
-        await page.evaluate(
-          ([user, pass]) => {
-            function setNativeValue(el: HTMLInputElement, value: string) {
-              const setter = Object.getOwnPropertyDescriptor(
-                window.HTMLInputElement.prototype,
-                "value"
-              )?.set;
-              setter?.call(el, value);
-              el.dispatchEvent(new Event("input", { bubbles: true }));
-              el.dispatchEvent(new Event("change", { bubbles: true }));
-              el.dispatchEvent(new Event("blur", { bubbles: true }));
-            }
-            const inputs = Array.from(document.querySelectorAll("input"));
-            const userEl = inputs.find(
-              (i) =>
-                i.type === "text" ||
-                i.type === "email" ||
-                i.name === "username" ||
-                i.id?.toLowerCase().includes("user")
-            );
-            const passEl = inputs.find(
-              (i) => i.type === "password" || i.name === "password"
-            );
-            if (userEl) setNativeValue(userEl, user as string);
-            if (passEl) setNativeValue(passEl, pass as string);
-          },
-          [username, password]
-        );
-
-        // Wait for Angular to enable the submit button
-        await page
-          .waitForSelector(
-            'button[type="submit"]:not([disabled]):not(.mat-button-disabled)',
-            { timeout: 8000 }
-          )
-          .catch(() => {});
-
-        // Click submit — force:true bypasses disabled check as last resort
-        await page
-          .click('button[type="submit"]:not([disabled])')
-          .catch(() =>
-            page.click('button[type="submit"]', { force: true })
-          );
-
-        await page
-          .waitForNavigation({ waitUntil: "networkidle", timeout: 20000 })
-          .catch(() => {});
+    context.on("response", async (res) => {
+      const url = res.url();
+      if (
+        url.includes("/api/") ||
+        url.includes("/auth") ||
+        url.includes("/login") ||
+        url.includes("/token") ||
+        url.includes("/notification")
+      ) {
+        const body = await res.text().catch(() => "");
+        capturedResponses.push({ url, status: res.status(), body: body.substring(0, 2000) });
       }
+    });
 
-      // Navigate to notifications page after login
-      currentUrl = page.url();
-      if (!currentUrl.includes("/notification")) {
-        await page.goto(`${SMARTSCHOOL_URL}/notification`, {
-          waitUntil: "networkidle",
-          timeout: 20000,
-        }).catch(() => {});
-      }
+    const page = await context.newPage();
+
+    // Go to login page and wait for it to fully render
+    await page.goto(`${SMARTSCHOOL_URL}/account/login`, {
+      waitUntil: "networkidle",
+      timeout: 30000,
+    }).catch(() => {});
+
+    // Wait for Angular to hydrate
+    await page.waitForTimeout(2000);
+
+    // Use Playwright locators with pressSequentially — triggers each keystroke
+    // individually which reliably fires Angular reactive form validation
+    const userLocator = page.locator('input[type="text"], input[type="email"]').first();
+    const passLocator = page.locator('input[type="password"]').first();
+
+    await userLocator.click();
+    await userLocator.pressSequentially(username, { delay: 80 });
+
+    await passLocator.click();
+    await passLocator.pressSequentially(password, { delay: 80 });
+
+    // Give Angular 2s to validate the form after typing
+    await page.waitForTimeout(2000);
+
+    // Try pressing Enter to submit (works even if button is disabled due to captcha)
+    await passLocator.press("Enter");
+
+    // Wait for navigation after submit
+    await page.waitForTimeout(3000);
+    await page.waitForLoadState("networkidle").catch(() => {});
+
+    // If still on login page, try force-clicking the submit button
+    if (page.url().includes("/login") || page.url().includes("/account")) {
+      await page
+        .click('button[type="submit"]', { force: true })
+        .catch(() => {});
+      await page.waitForTimeout(3000);
+      await page.waitForLoadState("networkidle").catch(() => {});
     }
 
-    // Wait extra time for Angular/React SPA to render content
-    await page.waitForTimeout(3000);
+    // Navigate to notifications
+    if (!page.url().includes("/notification")) {
+      await page.goto(`${SMARTSCHOOL_URL}/notification`, {
+        waitUntil: "networkidle",
+        timeout: 20000,
+      }).catch(() => {});
+    }
 
-    // Try to wait for any row-like elements (Angular Material or standard table)
+    // Wait for Angular to render table content
+    await page.waitForTimeout(3000);
     await page
-      .waitForSelector(
-        [
-          "mat-row",
-          "tr.mat-row",
-          "tbody tr",
-          "[class*='notification-row']",
-          "[class*='notification-item']",
-        ].join(", "),
-        { timeout: 10000 }
-      )
-      .catch(() => {
-        // Proceed even if no known selector found
-      });
+      .waitForSelector("mat-row, tr.mat-row, tbody tr", { timeout: 8000 })
+      .catch(() => {});
 
     if (debugMode) {
       const html = await page.content();
       await browser.close();
-      return NextResponse.json({ url: page.url(), html: html.substring(0, 50000) });
+      return NextResponse.json({
+        finalUrl: page.url(),
+        capturedRequests,
+        capturedResponses,
+        html: html.substring(0, 30000),
+      });
     }
 
-    // Extract announcements — handles Angular Material tables and standard HTML tables
+    // Extract announcements
     const scraped = await page.evaluate(() => {
-      const results: Array<{
-        id: string;
-        title: string;
-        content: string;
-        date: string;
-      }> = [];
+      const results: Array<{ id: string; title: string; content: string; date: string }> = [];
 
-      // --- Strategy 1: Angular Material table rows (mat-row) ---
+      // Strategy 1: Angular Material table rows
       const matRows = Array.from(
         document.querySelectorAll("mat-row, tr.mat-row, [class*='mat-row']")
       );
-
       if (matRows.length > 0) {
         matRows.slice(0, 5).forEach((row, idx) => {
           const cells = Array.from(
@@ -190,34 +174,34 @@ export async function POST(request: Request) {
         });
       }
 
-      // --- Strategy 2: Standard HTML table rows (skip header) ---
+      // Strategy 2: Standard HTML table rows
       if (results.length === 0) {
-        const tables = document.querySelectorAll("table");
-        tables.forEach((table) => {
-          const rows = Array.from(table.querySelectorAll("tbody tr, tr:not(:first-child)"));
-          rows.slice(0, 5).forEach((row, idx) => {
-            const cells = Array.from(row.querySelectorAll("td"));
-            const texts = cells.map((c) => c.textContent?.trim() || "").filter(Boolean);
-            if (texts.length > 0) {
-              results.push({
-                id: row.getAttribute("data-id") || `row-${idx}`,
-                title: texts[0].substring(0, 120),
-                content: texts.slice(0, 2).join(" | "),
-                date: texts[1] || new Date().toISOString(),
-              });
-            }
-          });
+        document.querySelectorAll("table").forEach((table) => {
+          Array.from(table.querySelectorAll("tbody tr, tr:not(:first-child)"))
+            .slice(0, 5)
+            .forEach((row, idx) => {
+              const texts = Array.from(row.querySelectorAll("td"))
+                .map((c) => c.textContent?.trim() || "")
+                .filter(Boolean);
+              if (texts.length > 0) {
+                results.push({
+                  id: row.getAttribute("data-id") || `row-${idx}`,
+                  title: texts[0].substring(0, 120),
+                  content: texts.slice(0, 2).join(" | "),
+                  date: texts[1] || new Date().toISOString(),
+                });
+              }
+            });
         });
       }
 
-      // --- Strategy 3: Any list items or divs with substantial text ---
+      // Strategy 3: Any element with enough text
       if (results.length === 0) {
-        const candidates = Array.from(
+        Array.from(
           document.querySelectorAll(
             "li, .notification-item, .message-item, div[class*='notification'], div[class*='message']"
           )
-        );
-        candidates
+        )
           .filter((el) => (el.textContent?.trim().length || 0) > 20)
           .slice(0, 5)
           .forEach((el, idx) => {
@@ -239,19 +223,16 @@ export async function POST(request: Request) {
     if (scraped.length === 0) {
       return NextResponse.json({
         synced: 0,
-        message: "No announcements found on page. Try POST /api/scrape-school?debug=1 to inspect HTML.",
+        message:
+          "No announcements found. Run with ?debug=1 to see captured API calls and HTML.",
       });
     }
 
-    // Upsert announcements — skip ones already saved (by externalId)
     let synced = 0;
     for (const item of scraped) {
       await prisma.schoolAnnouncement.upsert({
         where: { externalId: `smartschool-${item.id}` },
-        update: {
-          title: item.title,
-          content: item.content,
-        },
+        update: { title: item.title, content: item.content },
         create: {
           title: item.title,
           content: item.content,
