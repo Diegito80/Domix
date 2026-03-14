@@ -78,7 +78,7 @@ export default function AnnouncementsPage() {
 
   useEffect(() => {
     fetchAnnouncements();
-    const interval = setInterval(fetchAnnouncements, 30000);
+    const interval = setInterval(fetchAnnouncements, 4 * 60 * 60 * 1000);
     return () => clearInterval(interval);
   }, [fetchAnnouncements]);
 
