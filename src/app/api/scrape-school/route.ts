@@ -60,31 +60,36 @@ export async function POST(request: Request) {
     // Wait for Angular to initialize and call its startup APIs
     await page.waitForTimeout(2000);
 
-    // --- FIND LOGIN ENDPOINT by scanning Angular bundle JavaScript ---
-    const endpointScan = await page.evaluate(async () => {
-      // Get all loaded script URLs
-      const scripts = Array.from(document.querySelectorAll("script[src]"))
-        .map((s) => (s as HTMLScriptElement).src)
-        .filter((s) => s.includes("webtop.smartschool") && !s.includes("recaptcha"));
-
-      const found: string[] = [];
-      for (const src of scripts.slice(0, 5)) {
-        try {
-          const res = await fetch(src);
-          const text = await res.text();
-          // Search for API endpoint strings in the bundle
-          const matches = text.match(/['"](\/server\/api\/[^'"]{3,80})['"]/g) || [];
-          found.push(...matches.map((m) => m.replace(/['"]/g, "")));
-        } catch {
-          // ignore
-        }
-      }
-      return [...new Set(found)].sort();
-    });
-
     if (debugMode) {
+      // Dump the live DOM form structure and all script URLs
+      const debugInfo = await page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll("input")).map((i) => ({
+          type: i.type,
+          name: i.name,
+          id: i.id,
+          placeholder: i.placeholder,
+          disabled: i.disabled,
+          value: i.value ? "[has value]" : "[empty]",
+          className: i.className.substring(0, 80),
+        }));
+
+        const buttons = Array.from(document.querySelectorAll("button")).map((b) => ({
+          type: b.type,
+          disabled: b.disabled,
+          ariaDisabled: b.getAttribute("aria-disabled"),
+          text: b.textContent?.trim().substring(0, 40),
+          className: b.className.substring(0, 80),
+        }));
+
+        const scripts = Array.from(document.querySelectorAll("script"))
+          .map((s) => ({ src: s.src, inline: !s.src ? s.textContent?.substring(0, 100) : null }))
+          .filter((s) => s.src || s.inline);
+
+        return { inputs, buttons, scriptCount: scripts.length, scripts: scripts.slice(0, 20) };
+      });
+
       await browser.close();
-      return NextResponse.json({ endpointScan });
+      return NextResponse.json(debugInfo);
     }
 
     // Use discovered endpoints or fall back to guesses
