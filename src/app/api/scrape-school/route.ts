@@ -60,38 +60,54 @@ export async function POST(request: Request) {
     // Wait for Angular to initialize and call its startup APIs
     await page.waitForTimeout(2000);
 
-    // --- LOGIN VIA DIRECT API CALL from within the browser page ---
-    // The Angular app already has CORS access + correct cookies to webtopserver.
-    // We bypass the UI form entirely and call the login API with credentials: "include".
-    const loginResult = await page.evaluate(
-      async ([user, pass, apiUrl]) => {
-        // Try multiple login endpoint names and body formats
-        const endpoints = [
-          "user/Login",
-          "user/login",
-          "user/signIn",
-          "user/SignIn",
-          "user/userLogin",
-          "user/UserLogin",
-          "user/loginUser",
-          "user/LoginUser",
-          "auth/login",
-          "auth/signIn",
-        ];
+    // --- FIND LOGIN ENDPOINT by scanning Angular bundle JavaScript ---
+    const endpointScan = await page.evaluate(async () => {
+      // Get all loaded script URLs
+      const scripts = Array.from(document.querySelectorAll("script[src]"))
+        .map((s) => (s as HTMLScriptElement).src)
+        .filter((s) => s.includes("webtop.smartschool") && !s.includes("recaptcha"));
 
-        // Try both param1/param2 and username/password body formats
+      const found: string[] = [];
+      for (const src of scripts.slice(0, 5)) {
+        try {
+          const res = await fetch(src);
+          const text = await res.text();
+          // Search for API endpoint strings in the bundle
+          const matches = text.match(/['"](\/server\/api\/[^'"]{3,80})['"]/g) || [];
+          found.push(...matches.map((m) => m.replace(/['"]/g, "")));
+        } catch {
+          // ignore
+        }
+      }
+      return [...new Set(found)].sort();
+    });
+
+    if (debugMode) {
+      await browser.close();
+      return NextResponse.json({ endpointScan });
+    }
+
+    // Use discovered endpoints or fall back to guesses
+    const loginEndpoints = (endpointScan as string[]).filter(
+      (e) => e.toLowerCase().includes("login") || e.toLowerCase().includes("signin") || e.toLowerCase().includes("auth")
+    );
+    if (loginEndpoints.length === 0) {
+      loginEndpoints.push("/server/api/user/login", "/server/api/user/signIn");
+    }
+
+    // --- LOGIN VIA DIRECT API CALL from within the browser page ---
+    const loginResult = await page.evaluate(
+      async ([user, pass, endpoints]) => {
         const bodies = (u: string, p: string) => [
           { param1: u, param2: p },
           { param1: u, param2: p, param3: null, param4: "" },
           { username: u, password: p },
-          { userName: u, password: p },
-          { user: u, pass: p },
         ];
 
-        for (const ep of endpoints) {
+        for (const ep of endpoints as string[]) {
           for (const body of bodies(user, pass)) {
             try {
-              const res = await fetch(`${apiUrl}/${ep}`, {
+              const res = await fetch(`https://webtopserver.smartschool.co.il${ep}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
@@ -100,25 +116,20 @@ export async function POST(request: Request) {
               if (res.status !== 404) {
                 const text = await res.text().catch(() => "");
                 let data: unknown = text;
-                try {
-                  data = JSON.parse(text);
-                } catch {}
-                // Any non-404 response tells us we hit the right endpoint
+                try { data = JSON.parse(text); } catch {}
                 return { endpoint: ep, body, status: res.status, data };
               }
-            } catch (_e) {
-              // continue
-            }
+            } catch (_e) { /* continue */ }
           }
         }
-        return { error: "All login endpoints returned 404" };
+        return { error: "No working login endpoint found", tried: endpoints };
       },
-      [username, password, API_URL]
+      [username, password, loginEndpoints]
     );
 
-    if (debugMode) {
+    if (!loginResult || (loginResult as Record<string, unknown>).error) {
       await browser.close();
-      return NextResponse.json({ loginResult });
+      return NextResponse.json({ synced: 0, message: "Login failed", loginResult });
     }
 
     // Check if login succeeded
