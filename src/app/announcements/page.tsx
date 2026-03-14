@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Pin, Trash2, Plus, X, AlertCircle, Info, BookOpen } from "lucide-react";
+import { Pin, Trash2, Plus, X, AlertCircle, Info, BookOpen, RefreshCw } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { AppShell } from "@/components/layout/AppShell";
 import { useAudioFeedback } from "@/lib/hooks/useAudioFeedback";
@@ -67,6 +67,8 @@ export default function AnnouncementsPage() {
   const [subject, setSubject] = useState("general");
   const [priority, setPriority] = useState("normal");
   const [submitting, setSubmitting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const isParent = activeMember?.role === "parent";
 
@@ -78,7 +80,7 @@ export default function AnnouncementsPage() {
 
   useEffect(() => {
     fetchAnnouncements();
-    const interval = setInterval(fetchAnnouncements, 30000);
+    const interval = setInterval(fetchAnnouncements, 4 * 60 * 60 * 1000);
     return () => clearInterval(interval);
   }, [fetchAnnouncements]);
 
@@ -112,6 +114,27 @@ export default function AnnouncementsPage() {
     fetchAnnouncements();
   };
 
+  const handleSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const res = await fetch("/api/scrape-school", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setSyncMessage(data.synced > 0 ? `סונכרנו ${data.synced} הודעות` : "אין הודעות חדשות");
+        fetchAnnouncements();
+      } else {
+        setSyncMessage(`שגיאה: ${data.error}`);
+      }
+    } catch {
+      setSyncMessage("שגיאת רשת");
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMessage(null), 4000);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     await fetch(`/api/announcements/${id}`, { method: "DELETE" });
     fetchAnnouncements();
@@ -127,16 +150,33 @@ export default function AnnouncementsPage() {
             <p className="text-text-secondary text-sm mt-0.5">הודעות ועדכונים מבית הספר</p>
           </div>
           {isParent && (
-            <button
-              onClick={() => setShowForm((v) => !v)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white font-medium transition-all active:scale-95"
-              style={{ backgroundColor: activeMember?.color || "#D4A574" }}
-            >
-              {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {showForm ? "ביטול" : "הודעה חדשה"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border text-text-secondary font-medium transition-all active:scale-95 hover:bg-background disabled:opacity-50"
+                title="סנכרן הודעות מבית הספר"
+              >
+                <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
+              </button>
+              <button
+                onClick={() => setShowForm((v) => !v)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white font-medium transition-all active:scale-95"
+                style={{ backgroundColor: activeMember?.color || "#D4A574" }}
+              >
+                {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                {showForm ? "ביטול" : "הודעה חדשה"}
+              </button>
+            </div>
           )}
         </div>
+
+        {/* Sync status message */}
+        {syncMessage && (
+          <div className="mb-4 px-4 py-2.5 rounded-xl bg-background border border-border text-sm text-text-secondary text-center">
+            {syncMessage}
+          </div>
+        )}
 
         {/* New announcement form */}
         <AnimatePresence>

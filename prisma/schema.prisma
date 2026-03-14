@@ -143,12 +143,14 @@ model ShoppingItem {
 }
 
 model SchoolAnnouncement {
-  id        String   @id @default(cuid())
-  title     String
-  content   String
-  subject   String   @default("general") // "math" | "science" | "language" | "sports" | "general"
-  priority  String   @default("normal")  // "urgent" | "normal" | "info"
-  pinned    Boolean  @default(false)
+  id         String   @id @default(cuid())
+  title      String
+  content    String
+  subject    String   @default("general") // "math" | "science" | "language" | "sports" | "general"
+  priority   String   @default("normal")  // "urgent" | "normal" | "info"
+  pinned     Boolean  @default(false)
+  source     String   @default("manual")  // "manual" | "smartschool"
+  externalId String?  @unique             // unique id from SmartSchool to prevent duplicates
 
   author    FamilyMember @relation(fields: [authorId], references: [id])
   authorId  String
