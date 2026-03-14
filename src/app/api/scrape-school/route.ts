@@ -74,21 +74,54 @@ export async function POST(request: Request) {
       const passInput = await page.$('input[name="password"], input[type="password"]');
 
       if (userInput && passInput) {
-        // Use type() to trigger Angular reactive form validation (fill() bypasses it)
-        await userInput.click();
-        await page.keyboard.type(username, { delay: 50 });
-        await passInput.click();
-        await page.keyboard.type(password, { delay: 50 });
+        // Directly set values and dispatch native Angular-compatible events
+        await page.evaluate(
+          ([user, pass]) => {
+            function setNativeValue(el: HTMLInputElement, value: string) {
+              const setter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype,
+                "value"
+              )?.set;
+              setter?.call(el, value);
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              el.dispatchEvent(new Event("blur", { bubbles: true }));
+            }
+            const inputs = Array.from(document.querySelectorAll("input"));
+            const userEl = inputs.find(
+              (i) =>
+                i.type === "text" ||
+                i.type === "email" ||
+                i.name === "username" ||
+                i.id?.toLowerCase().includes("user")
+            );
+            const passEl = inputs.find(
+              (i) => i.type === "password" || i.name === "password"
+            );
+            if (userEl) setNativeValue(userEl, user as string);
+            if (passEl) setNativeValue(passEl, pass as string);
+          },
+          [username, password]
+        );
 
         // Wait for Angular to enable the submit button
         await page
-          .waitForSelector('button[type="submit"]:not([disabled]):not(.mat-button-disabled)', {
-            timeout: 5000,
-          })
+          .waitForSelector(
+            'button[type="submit"]:not([disabled]):not(.mat-button-disabled)',
+            { timeout: 8000 }
+          )
           .catch(() => {});
 
-        await page.click('button[type="submit"]:not([disabled]), button[aria-label="כניסה"]:not([disabled])');
-        await page.waitForNavigation({ waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
+        // Click submit — force:true bypasses disabled check as last resort
+        await page
+          .click('button[type="submit"]:not([disabled])')
+          .catch(() =>
+            page.click('button[type="submit"]', { force: true })
+          );
+
+        await page
+          .waitForNavigation({ waitUntil: "networkidle", timeout: 20000 })
+          .catch(() => {});
       }
 
       // Navigate to notifications page after login
