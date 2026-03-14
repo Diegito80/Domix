@@ -85,6 +85,18 @@ export async function POST(request: Request) {
 
     const page = await context.newPage();
 
+    // Inject a grecaptcha mock BEFORE the page loads so Angular's captcha
+    // directive thinks verification is already complete and enables the submit button
+    await page.addInitScript(() => {
+      (window as unknown as Record<string, unknown>)["grecaptcha"] = {
+        ready: (cb: () => void) => cb(),
+        execute: (_siteKey: string, _opts: unknown) => Promise.resolve("mock-token"),
+        render: () => 0,
+        getResponse: () => "mock-token",
+        reset: () => {},
+      };
+    });
+
     // Go to login page and wait for it to fully render
     await page.goto(`${SMARTSCHOOL_URL}/account/login`, {
       waitUntil: "networkidle",
@@ -105,24 +117,28 @@ export async function POST(request: Request) {
     await passLocator.click();
     await passLocator.pressSequentially(password, { delay: 80 });
 
-    // Give Angular 2s to validate the form after typing
+    // Give Angular 2s to run form validation after typing
     await page.waitForTimeout(2000);
 
-    // Try pressing Enter to submit (works even if button is disabled due to captcha)
-    await passLocator.press("Enter");
+    // Wait for submit button to become enabled (captcha mock should allow it)
+    await page
+      .waitForSelector(
+        'button[type="submit"]:not([disabled]):not(.mat-button-disabled)',
+        { timeout: 5000 }
+      )
+      .catch(() => {});
+
+    // Click submit or press Enter as fallback
+    const submitEnabled = await page.$('button[type="submit"]:not([disabled])');
+    if (submitEnabled) {
+      await submitEnabled.click();
+    } else {
+      await passLocator.press("Enter");
+    }
 
     // Wait for navigation after submit
     await page.waitForTimeout(3000);
     await page.waitForLoadState("networkidle").catch(() => {});
-
-    // If still on login page, try force-clicking the submit button
-    if (page.url().includes("/login") || page.url().includes("/account")) {
-      await page
-        .click('button[type="submit"]', { force: true })
-        .catch(() => {});
-      await page.waitForTimeout(3000);
-      await page.waitForLoadState("networkidle").catch(() => {});
-    }
 
     // Navigate to notifications
     if (!page.url().includes("/notification")) {
