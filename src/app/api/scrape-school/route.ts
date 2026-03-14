@@ -98,38 +98,6 @@ export async function POST(request: Request) {
     // Wait for Angular to initialize and call its startup APIs
     await page.waitForTimeout(2000);
 
-    if (debugMode) {
-      // Dump the live DOM form structure and all script URLs
-      const debugInfo = await page.evaluate(() => {
-        const inputs = Array.from(document.querySelectorAll("input")).map((i) => ({
-          type: i.type,
-          name: i.name,
-          id: i.id,
-          placeholder: i.placeholder,
-          disabled: i.disabled,
-          value: i.value ? "[has value]" : "[empty]",
-          className: i.className.substring(0, 80),
-        }));
-
-        const buttons = Array.from(document.querySelectorAll("button")).map((b) => ({
-          type: b.type,
-          disabled: b.disabled,
-          ariaDisabled: b.getAttribute("aria-disabled"),
-          text: b.textContent?.trim().substring(0, 40),
-          className: b.className.substring(0, 80),
-        }));
-
-        const scripts = Array.from(document.querySelectorAll("script"))
-          .map((s) => ({ src: s.src, inline: !s.src ? s.textContent?.substring(0, 100) : null }))
-          .filter((s) => s.src || s.inline);
-
-        return { inputs, buttons, scriptCount: scripts.length, scripts: scripts.slice(0, 20) };
-      });
-
-      await browser.close();
-      return NextResponse.json(debugInfo);
-    }
-
     // Fill credentials with keystroke simulation (triggers Angular reactive form validation)
     const userLocator = page.locator('input[type="text"]').first();
     const passLocator = page.locator('input[type="password"]').first();
