@@ -74,9 +74,20 @@ export async function POST(request: Request) {
       const passInput = await page.$('input[name="password"], input[type="password"]');
 
       if (userInput && passInput) {
-        await userInput.fill(username);
-        await passInput.fill(password);
-        await page.click('button[type="submit"], input[type="submit"], button:has-text("כניסה"), button:has-text("התחבר")');
+        // Use type() to trigger Angular reactive form validation (fill() bypasses it)
+        await userInput.click();
+        await page.keyboard.type(username, { delay: 50 });
+        await passInput.click();
+        await page.keyboard.type(password, { delay: 50 });
+
+        // Wait for Angular to enable the submit button
+        await page
+          .waitForSelector('button[type="submit"]:not([disabled]):not(.mat-button-disabled)', {
+            timeout: 5000,
+          })
+          .catch(() => {});
+
+        await page.click('button[type="submit"]:not([disabled]), button[aria-label="כניסה"]:not([disabled])');
         await page.waitForNavigation({ waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
       }
 
