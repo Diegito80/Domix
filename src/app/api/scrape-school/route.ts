@@ -43,14 +43,17 @@ export async function POST() {
       locale: "he-IL",
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      httpCredentials: { username, password },
     });
 
     const page = await context.newPage();
 
     // Navigate to the notifications page (will redirect to login if not authenticated)
     await page.goto(`${SMARTSCHOOL_URL}/notification`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 30000,
+    }).catch(() => {
+      // Ignore HTTP error codes (e.g. redirect to login returns non-2xx)
     });
 
     // If redirected to login page, perform login
@@ -61,14 +64,14 @@ export async function POST() {
       await page.fill('input[name="password"], input[type="password"]', password);
       await page.click('button[type="submit"], input[type="submit"]');
 
-      await page.waitForNavigation({ waitUntil: "networkidle", timeout: 15000 });
+      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
 
       // Navigate to notifications after login
       if (!page.url().includes("/notification")) {
         await page.goto(`${SMARTSCHOOL_URL}/notification`, {
-          waitUntil: "networkidle",
+          waitUntil: "domcontentloaded",
           timeout: 15000,
-        });
+        }).catch(() => {});
       }
     }
 
