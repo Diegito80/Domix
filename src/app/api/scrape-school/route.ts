@@ -49,7 +49,45 @@ export async function POST(request: Request) {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     });
 
+    // Block the real reCAPTCHA so our mock isn't overwritten
+    await context.route("**/*recaptcha*", (route) => route.abort());
+
     const page = await context.newPage();
+
+    // Inject a full grecaptcha mock BEFORE the page loads.
+    // The ng2-recaptcha Angular library calls grecaptcha.render(el, { callback, ... })
+    // — our mock calls that callback immediately with a fake token, which marks
+    // the captcha form control as valid and enables the submit button.
+    await page.addInitScript(() => {
+      const w = window as unknown as Record<string, unknown>;
+
+      // Angular sets window.ng2recaptchaloaded as the onload callback for the real script.
+      // We intercept it so we can call it ourselves after setting up the mock.
+      let _onload: (() => void) | null = null;
+      Object.defineProperty(w, "ng2recaptchaloaded", {
+        configurable: true,
+        set(fn: () => void) { _onload = fn; },
+        get() { return _onload; },
+      });
+
+      w["grecaptcha"] = {
+        ready: (cb: () => void) => { setTimeout(cb, 0); },
+        execute: (_key: string, _opts: unknown) => Promise.resolve("mock-captcha-token"),
+        render: (_el: HTMLElement, config: Record<string, unknown>) => {
+          // Call the success callback that ng2-recaptcha passes in — this is what
+          // sets the captcha form control value and enables the submit button.
+          if (typeof config?.callback === "function") {
+            setTimeout(() => (config.callback as (t: string) => void)("mock-captcha-token"), 300);
+          }
+          return 0;
+        },
+        getResponse: () => "mock-captcha-token",
+        reset: () => {},
+      };
+
+      // Trigger the ng2recaptchaloaded callback once Angular has set it
+      setTimeout(() => { if (_onload) _onload(); }, 800);
+    });
 
     // Load the login page so Angular initializes the session (sets cookies, calls getInput etc.)
     await page.goto(`${SMARTSCHOOL_URL}/account/login`, {
@@ -92,130 +130,109 @@ export async function POST(request: Request) {
       return NextResponse.json(debugInfo);
     }
 
-    // Use discovered endpoints or fall back to guesses
-    const loginEndpoints = (endpointScan as string[]).filter(
-      (e) => e.toLowerCase().includes("login") || e.toLowerCase().includes("signin") || e.toLowerCase().includes("auth")
-    );
-    if (loginEndpoints.length === 0) {
-      loginEndpoints.push("/server/api/user/login", "/server/api/user/signIn");
-    }
+    // Fill credentials with keystroke simulation (triggers Angular reactive form validation)
+    const userLocator = page.locator('input[type="text"]').first();
+    const passLocator = page.locator('input[type="password"]').first();
 
-    // --- LOGIN VIA DIRECT API CALL from within the browser page ---
-    const loginResult = await page.evaluate(
-      async ([user, pass, endpoints]) => {
-        const bodies = (u: string, p: string) => [
-          { param1: u, param2: p },
-          { param1: u, param2: p, param3: null, param4: "" },
-          { username: u, password: p },
-        ];
+    await userLocator.click();
+    await userLocator.pressSequentially(username, { delay: 60 });
+    await passLocator.click();
+    await passLocator.pressSequentially(password, { delay: 60 });
 
-        for (const ep of endpoints as string[]) {
-          for (const body of bodies(user, pass)) {
-            try {
-              const res = await fetch(`https://webtopserver.smartschool.co.il${ep}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify(body),
-              });
-              if (res.status !== 404) {
-                const text = await res.text().catch(() => "");
-                let data: unknown = text;
-                try { data = JSON.parse(text); } catch {}
-                return { endpoint: ep, body, status: res.status, data };
-              }
-            } catch (_e) { /* continue */ }
-          }
+    // Wait for our captcha mock's callback (fires at 300ms) to enable the button
+    await page.waitForSelector(
+      'button[type="submit"]:not([disabled]):not(.mat-button-disabled)',
+      { timeout: 5000 }
+    ).catch(() => {});
+
+    // Intercept the login API call to capture the real endpoint + session cookies
+    let loginApiUrl = "";
+    const loginPromise = new Promise<void>((resolve) => {
+      context.on("request", (req) => {
+        if (
+          req.method() === "POST" &&
+          req.url().includes("webtopserver") &&
+          !req.url().includes("getInput") &&
+          !req.url().includes("RememberMe") &&
+          !req.url().includes("LogOut")
+        ) {
+          loginApiUrl = req.url();
+          resolve();
         }
-        return { error: "No working login endpoint found", tried: endpoints };
-      },
-      [username, password, loginEndpoints]
-    );
-
-    if (!loginResult || (loginResult as Record<string, unknown>).error) {
-      await browser.close();
-      return NextResponse.json({ synced: 0, message: "Login failed", loginResult });
-    }
-
-    // Check if login succeeded
-    const loginData = loginResult as Record<string, unknown>;
-    const loginSucceeded =
-      loginData.status === 200 &&
-      (loginData.data as Record<string, unknown>)?.status === true;
-
-    if (!loginSucceeded) {
-      await browser.close();
-      return NextResponse.json({
-        synced: 0,
-        message: "Login failed or endpoint not found. Run with ?debug=1 for details.",
-        loginResult,
       });
+      // Resolve anyway after 8s in case no login request fires
+      setTimeout(resolve, 8000);
+    });
+
+    const submitBtn = await page.$('button[aria-label="כניסה"]:not([disabled])');
+    if (submitBtn) {
+      await submitBtn.click();
+    } else {
+      await passLocator.press("Enter");
     }
 
-    // --- FETCH NOTIFICATIONS via API ---
-    const notifResult = await page.evaluate(
-      async (apiUrl) => {
-        const endpoints = [
-          "notification/getList",
-          "notification/getNotifications",
-          "notification/list",
-          "notification/GetList",
-          "notification/GetNotifications",
-          "user/getNotifications",
-          "user/notifications",
-        ];
+    await loginPromise;
+    await page.waitForTimeout(3000);
+    await page.waitForLoadState("networkidle").catch(() => {});
 
-        for (const ep of endpoints) {
-          try {
-            const res = await fetch(`${apiUrl}/${ep}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "include",
-              body: "{}",
-            });
-            if (res.status !== 404) {
-              const text = await res.text().catch(() => "");
-              let data: unknown = text;
-              try {
-                data = JSON.parse(text);
-              } catch {}
-              return { endpoint: ep, status: res.status, data };
-            }
-          } catch (_e) {
-            // continue
+    if (debugMode) {
+      const finalUrl = page.url();
+      await browser.close();
+      return NextResponse.json({ finalUrl, loginApiUrl, loginSucceeded: !finalUrl.includes("/login") });
+    }
+
+    // Navigate to notifications page
+    if (!page.url().includes("/notification")) {
+      await page.goto(`${SMARTSCHOOL_URL}/notification`, {
+        waitUntil: "networkidle",
+        timeout: 20000,
+      }).catch(() => {});
+    }
+
+    // Wait for Angular to render the notifications table
+    await page.waitForTimeout(3000);
+    await page.waitForSelector("mat-row, tr.mat-row, tbody tr", { timeout: 8000 }).catch(() => {});
+
+    // Extract announcements from the rendered table
+    const items = await page.evaluate(() => {
+      const results: Array<{ id: string; title: string; content: string; date: string }> = [];
+
+      const matRows = Array.from(document.querySelectorAll("mat-row, tr.mat-row, [class*='mat-row']"));
+      if (matRows.length > 0) {
+        matRows.slice(0, 10).forEach((row, idx) => {
+          const cells = Array.from(row.querySelectorAll("mat-cell, td.mat-cell, td, [class*='mat-cell']"));
+          const texts = cells.map((c) => c.textContent?.trim() || "").filter(Boolean);
+          if (texts.length > 0) {
+            results.push({ id: row.getAttribute("data-id") || String(idx), title: texts[0].substring(0, 120), content: texts.slice(0, 2).join(" | "), date: texts[1] || new Date().toISOString() });
           }
-        }
-        return { error: "No notification endpoint found" };
-      },
-      API_URL
-    );
+        });
+      }
+
+      if (results.length === 0) {
+        document.querySelectorAll("table").forEach((table) => {
+          Array.from(table.querySelectorAll("tbody tr, tr:not(:first-child)")).slice(0, 10).forEach((row, idx) => {
+            const texts = Array.from(row.querySelectorAll("td")).map((c) => c.textContent?.trim() || "").filter(Boolean);
+            if (texts.length > 0) {
+              results.push({ id: row.getAttribute("data-id") || `row-${idx}`, title: texts[0].substring(0, 120), content: texts.slice(0, 2).join(" | "), date: texts[1] || new Date().toISOString() });
+            }
+          });
+        });
+      }
+
+      return results;
+    });
 
     await browser.close();
 
-    // Parse notification data
-    const notifData = notifResult as Record<string, unknown>;
-    const rawData = (notifData.data as Record<string, unknown>)?.data;
-    const items: Array<Record<string, unknown>> = Array.isArray(rawData)
-      ? (rawData as Array<Record<string, unknown>>)
-      : [];
-
     if (items.length === 0) {
-      return NextResponse.json({
-        synced: 0,
-        message: "Login succeeded but no notifications found.",
-        notifResult,
-      });
+      return NextResponse.json({ synced: 0, message: "Logged in but no notifications found in table." });
     }
 
     let synced = 0;
-    for (const item of items.slice(0, 10)) {
-      const id = String(item.id || item.Id || Math.random());
-      const title = String(
-        item.title || item.Title || item.subject || item.Subject || ""
-      ).substring(0, 120);
-      const content = String(
-        item.content || item.Content || item.body || item.Body || item.message || title
-      );
+    for (const item of items) {
+      const id = item.id;
+      const title = item.title;
+      const content = item.content;
 
       await prisma.schoolAnnouncement.upsert({
         where: { externalId: `smartschool-${id}` },
