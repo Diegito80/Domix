@@ -5,7 +5,7 @@
  * A browser window will open — log in manually, then wait for the
  * notifications page. The script saves auth.json and exits.
  */
-import { chromium } from "playwright";
+import { chromium } from "playwright-core";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
