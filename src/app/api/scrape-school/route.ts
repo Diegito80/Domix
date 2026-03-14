@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import fs from "fs";
 import path from "path";
@@ -8,20 +9,127 @@ const CHROMIUM_PATH =
   process.env.CHROMIUM_PATH ||
   "/root/.cache/ms-playwright/chromium-1194/chrome-linux/chrome";
 
-export async function POST() {
+async function launchAndNavigate() {
   const authFilePath = path.join(process.cwd(), "auth.json");
 
   if (!fs.existsSync(authFilePath)) {
-    return NextResponse.json(
-      {
-        error:
-          "Missing auth.json. Run `node login.mjs` from the project root to generate it by logging in manually.",
-      },
-      { status: 401 }
-    );
+    return {
+      error:
+        "Missing auth.json. Run `node login.mjs` from the project root to generate it by logging in manually.",
+      status: 401,
+    };
   }
 
-  // Find a parent to use as the author for scraped announcements
+  const { chromium } = await import("playwright-core");
+
+  const browser = await chromium.launch({
+    executablePath: CHROMIUM_PATH,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    headless: true,
+  });
+
+  const context = await browser.newContext({
+    storageState: authFilePath,
+    locale: "he-IL",
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  });
+
+  const page = await context.newPage();
+
+  await page.goto(`${SMARTSCHOOL_URL}/notification`, {
+    waitUntil: "networkidle",
+    timeout: 30000,
+  });
+
+  if (page.url().includes("/login") || page.url().includes("/account")) {
+    await browser.close();
+    return {
+      error:
+        "Session expired. Run `node login.mjs` again to refresh auth.json.",
+      status: 401,
+    };
+  }
+
+  // Wait for Angular to render
+  await page.waitForTimeout(5000);
+
+  return { browser, page };
+}
+
+// Debug endpoint: GET /api/scrape-school — returns page HTML structure
+export async function GET() {
+  let browser;
+  try {
+    const result = await launchAndNavigate();
+    if ("error" in result) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: result.status }
+      );
+    }
+    browser = result.browser;
+    const page = result.page;
+
+    const debug = await page.evaluate(() => {
+      const body = document.body;
+
+      // Get a truncated snapshot of the body HTML
+      const bodyHtml = body.innerHTML.substring(0, 15000);
+
+      // Find all unique tag names in the page
+      const allTags = new Set<string>();
+      body.querySelectorAll("*").forEach((el) => allTags.add(el.tagName.toLowerCase()));
+
+      // Look for any list-like or repeating structures
+      const repeatingSelectors = [
+        "mat-row", "tr", "mat-list-item", "mat-card",
+        "[class*='notification']", "[class*='item']", "[class*='row']",
+        "[class*='list']", "[class*='message']", "[class*='alert']",
+        "li", "article", "section", ".card", "cdk-row",
+        "[class*='cdk-row']", "app-notification", "[class*='notif']",
+      ];
+
+      const found: Record<string, number> = {};
+      for (const sel of repeatingSelectors) {
+        try {
+          const count = document.querySelectorAll(sel).length;
+          if (count > 0) found[sel] = count;
+        } catch {}
+      }
+
+      // Get text content of first few elements that look like notifications
+      const sampleTexts: string[] = [];
+      for (const sel of Object.keys(found)) {
+        const els = document.querySelectorAll(sel);
+        els.forEach((el, i) => {
+          if (i < 3) {
+            const text = el.textContent?.trim().substring(0, 200);
+            if (text) sampleTexts.push(`[${sel}#${i}] ${text}`);
+          }
+        });
+      }
+
+      return {
+        url: window.location.href,
+        title: document.title,
+        allTags: Array.from(allTags).sort(),
+        matchingSelectors: found,
+        sampleTexts: sampleTexts.slice(0, 30),
+        bodyHtml,
+      };
+    });
+
+    await browser.close();
+    return NextResponse.json(debug);
+  } catch (err) {
+    if (browser) await browser.close().catch(() => {});
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function POST() {
   const systemAuthor = await prisma.familyMember.findFirst({
     where: { role: "parent" },
   });
@@ -35,44 +143,16 @@ export async function POST() {
 
   let browser;
   try {
-    const { chromium } = await import("playwright-core");
-
-    browser = await chromium.launch({
-      executablePath: CHROMIUM_PATH,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      headless: true,
-    });
-
-    // Restore the saved session (cookies + localStorage) — skips login entirely
-    const context = await browser.newContext({
-      storageState: authFilePath,
-      locale: "he-IL",
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    });
-
-    const page = await context.newPage();
-
-    // Go straight to notifications — authenticated session bypasses login
-    await page.goto(`${SMARTSCHOOL_URL}/notification`, {
-      waitUntil: "networkidle",
-      timeout: 30000,
-    });
-
-    // If redirected back to login the session expired — tell the user to re-run login.mjs
-    if (page.url().includes("/login") || page.url().includes("/account")) {
-      await browser.close();
+    const result = await launchAndNavigate();
+    if ("error" in result) {
       return NextResponse.json(
-        {
-          error:
-            "Session expired. Run `node login.mjs` again to refresh auth.json.",
-        },
-        { status: 401 }
+        { error: result.error },
+        { status: result.status }
       );
     }
+    browser = result.browser;
+    const page = result.page;
 
-    // Wait for Angular to render the notifications table
-    await page.waitForTimeout(3000);
     await page
       .waitForSelector("mat-row, tr.mat-row, tbody tr", { timeout: 8000 })
       .catch(() => {});
