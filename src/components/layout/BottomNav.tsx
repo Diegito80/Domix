@@ -9,6 +9,7 @@ import {
   Gift,
   Home,
   ShoppingCart,
+  GraduationCap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { href: "/calendar", icon: CalendarDays, label: "יומן" },
   { href: "/tasks", icon: CheckSquare, label: "משימות" },
   { href: "/chat", icon: MessageCircle, label: "הודעות" },
+  { href: "/announcements", icon: GraduationCap, label: "ביה״ס" },
   { href: "/kitchen", icon: ChefHat, label: "מטבח" },
   { href: "/rewards", icon: Gift, label: "פרסים" },
   { href: "/shopping", icon: ShoppingCart, label: "קניות" },

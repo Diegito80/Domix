@@ -18,11 +18,12 @@ model FamilyMember {
   points    Int      @default(0)
   createdAt DateTime @default(now())
 
-  createdTasks  Task[]        @relation("CreatedBy")
-  assignedTasks Task[]        @relation("AssignedTo")
-  messages      Message[]
-  redemptions   Redemption[]
-  drawings      Drawing[]
+  createdTasks         Task[]               @relation("CreatedBy")
+  assignedTasks        Task[]               @relation("AssignedTo")
+  messages             Message[]
+  redemptions          Redemption[]
+  drawings             Drawing[]
+  schoolAnnouncements  SchoolAnnouncement[]
 }
 
 model Task {
@@ -139,4 +140,19 @@ model ShoppingItem {
   name      String
   completed Boolean  @default(false)
   createdAt DateTime @default(now())
+}
+
+model SchoolAnnouncement {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  subject   String   @default("general") // "math" | "science" | "language" | "sports" | "general"
+  priority  String   @default("normal")  // "urgent" | "normal" | "info"
+  pinned    Boolean  @default(false)
+
+  author    FamilyMember @relation(fields: [authorId], references: [id])
+  authorId  String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
